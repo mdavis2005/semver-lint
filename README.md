@@ -68,10 +68,19 @@ the exit status.
 | `build-empty-id` | error | empty build metadata identifier |
 | `build-invalid-char` | error | build metadata identifier has a character outside `[0-9A-Za-z-]` |
 | `duplicate-version` | warning | exact same version string already appeared earlier in the file |
+| `non-increasing-version` | warning | version does not have a strictly greater precedence than the version on the line before it |
 
 Build metadata identifiers are allowed to have leading zeros - the spec
 never uses build metadata for precedence comparisons, so there is nothing
 to warn about there.
+
+`non-increasing-version` compares each line's precedence (per the ordering
+rules in semver.org section 11) against the line before it, not against
+the whole file - so a file can be in ascending order overall while a
+single out-of-place line still gets flagged against its immediate
+neighbor. Lines that don't parse are skipped when looking for the
+"previous" version, and an exact repeat of the line before it is left to
+`duplicate-version` instead of being flagged twice.
 
 ## Building and testing
 

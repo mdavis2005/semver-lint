@@ -144,6 +144,62 @@ function checkBuildId(field: Field, issues: ParseIssue[]): void {
   // allowed to have leading zeros: the spec never compares build metadata.
 }
 
+// Compares two numeric core fields (major/minor/patch) or numeric
+// pre-release identifiers that have already passed validation, so neither
+// has a leading zero (other than the single digit "0" itself). That means
+// plain length-then-lexicographic comparison gives the right numeric
+// ordering without needing BigInt for values beyond Number.MAX_SAFE_INTEGER.
+function compareNumericField(a: string, b: string): number {
+  if (a.length !== b.length) return a.length < b.length ? -1 : 1
+  if (a < b) return -1
+  if (a > b) return 1
+  return 0
+}
+
+function compareIdentifier(a: string, b: string): number {
+  const aNumeric = ALL_DIGITS.test(a)
+  const bNumeric = ALL_DIGITS.test(b)
+  if (aNumeric && bNumeric) return compareNumericField(a, b)
+  // Rule 11.4.1: numeric identifiers always have lower precedence than
+  // alphanumeric identifiers.
+  if (aNumeric !== bNumeric) return aNumeric ? -1 : 1
+  if (a < b) return -1
+  if (a > b) return 1
+  return 0
+}
+
+function comparePrerelease(a: string[], b: string[]): number {
+  const len = Math.min(a.length, b.length)
+  for (let i = 0; i < len; i++) {
+    const cmp = compareIdentifier(a[i], b[i])
+    if (cmp !== 0) return cmp
+  }
+  // Rule 11.4.4: a larger set of pre-release fields has higher precedence
+  // than a smaller set, once all shared fields compare equal.
+  if (a.length !== b.length) return a.length < b.length ? -1 : 1
+  return 0
+}
+
+// Implements the precedence ordering from semver.org 2.0.0 section 11.
+// Build metadata is intentionally ignored: the spec says it must not be
+// used when determining precedence.
+export function compareSemver(a: SemverParts, b: SemverParts): number {
+  const core =
+    compareNumericField(a.major, b.major) ||
+    compareNumericField(a.minor, b.minor) ||
+    compareNumericField(a.patch, b.patch)
+  if (core !== 0) return core
+
+  const aHasPrerelease = a.prerelease.length > 0
+  const bHasPrerelease = b.prerelease.length > 0
+  // Rule 11.3: a version with a pre-release has lower precedence than the
+  // same core version without one.
+  if (aHasPrerelease !== bHasPrerelease) return aHasPrerelease ? -1 : 1
+  if (!aHasPrerelease) return 0
+
+  return comparePrerelease(a.prerelease, b.prerelease)
+}
+
 export function parseSemver(input: string): ParseResult {
   const issues: ParseIssue[] = []
   let rest = input

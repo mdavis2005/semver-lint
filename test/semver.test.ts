@@ -1,7 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseSemver } from '../src/semver.js'
+import { compareSemver, parseSemver } from '../src/semver.js'
 import { lintText } from '../src/linter.js'
+
+function precedenceOf(version: string) {
+  const result = parseSemver(version)
+  assert.ok(result.ok && result.value, `expected '${version}' to parse cleanly`)
+  return result.value!
+}
 
 interface Case {
   name: string
@@ -88,4 +94,49 @@ test('lintText reports columns relative to leading whitespace and the v-prefix',
   assert.ok(leadingZero)
   // two spaces, then 'v', so the major field starts at column 4 (1-based)
   assert.equal(leadingZero?.column, 4)
+})
+
+test('compareSemver orders versions per the semver.org 2.0.0 section 11 example', () => {
+  // Straight from the spec: 1.0.0-alpha < 1.0.0-alpha.1 < ... < 1.0.0.
+  const ascending = [
+    '1.0.0-alpha',
+    '1.0.0-alpha.1',
+    '1.0.0-alpha.beta',
+    '1.0.0-beta',
+    '1.0.0-beta.2',
+    '1.0.0-beta.11',
+    '1.0.0-rc.1',
+    '1.0.0',
+    '2.0.0',
+    '2.1.0',
+    '2.1.1',
+  ].map(precedenceOf)
+
+  for (let i = 1; i < ascending.length; i++) {
+    assert.equal(compareSemver(ascending[i - 1], ascending[i]), -1, `expected index ${i - 1} < ${i}`)
+    assert.equal(compareSemver(ascending[i], ascending[i - 1]), 1, `expected index ${i} > ${i - 1}`)
+  }
+})
+
+test('compareSemver treats equal precedence as equal regardless of build metadata', () => {
+  assert.equal(compareSemver(precedenceOf('1.2.3+build.1'), precedenceOf('1.2.3+build.2')), 0)
+  assert.equal(compareSemver(precedenceOf('1.2.3-rc.1+a'), precedenceOf('1.2.3-rc.1+b')), 0)
+})
+
+test('lintText flags a version that does not increase over the line before it', () => {
+  const text = ['1.2.0', '1.1.0', '1.1.0'].join('\n')
+  const findings = lintText(text)
+  const ordering = findings.filter((finding) => finding.rule === 'non-increasing-version')
+  assert.equal(ordering.length, 1)
+  assert.equal(ordering[0].line, 2)
+  assert.match(ordering[0].message, /line 1/)
+  // the exact repeat on line 3 is duplicate-version's job, not ordering's
+  assert.ok(!findings.some((finding) => finding.rule === 'non-increasing-version' && finding.line === 3))
+  assert.ok(findings.some((finding) => finding.rule === 'duplicate-version' && finding.line === 3))
+})
+
+test('lintText skips unparseable lines when finding the previous version to compare against', () => {
+  const text = ['1.0.0', 'not-a-version', '2.0.0'].join('\n')
+  const findings = lintText(text)
+  assert.ok(!findings.some((finding) => finding.rule === 'non-increasing-version'))
 })

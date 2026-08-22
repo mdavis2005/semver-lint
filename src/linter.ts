@@ -4,7 +4,7 @@
 // and lines starting with '#' are ignored so the file can carry comments.
 
 import { readFile } from 'node:fs/promises'
-import { parseSemver } from './semver.js'
+import { compareSemver, parseSemver, type SemverParts } from './semver.js'
 
 export interface Finding {
   line: number
@@ -19,6 +19,7 @@ export function lintText(text: string): Finding[] {
   const findings: Finding[] = []
   const seen = new Map<string, number>()
   const lines = text.split(/\r\n|\r|\n/)
+  let previous: { value: SemverParts; text: string; line: number } | null = null
 
   for (let i = 0; i < lines.length; i++) {
     const rawLine = lines[i]
@@ -40,7 +41,7 @@ export function lintText(text: string): Finding[] {
       })
     }
 
-    if (result.ok) {
+    if (result.ok && result.value) {
       const firstLine = seen.get(trimmed)
       if (firstLine !== undefined) {
         findings.push({
@@ -54,6 +55,22 @@ export function lintText(text: string): Finding[] {
       } else {
         seen.set(trimmed, lineNo)
       }
+
+      // Skip the comparison when the line is an exact repeat of the one
+      // before it - that case is already covered by duplicate-version, and
+      // reporting both would just be noise about the same two lines.
+      if (previous && previous.text !== trimmed && compareSemver(result.value, previous.value) <= 0) {
+        findings.push({
+          line: lineNo,
+          column: leadingWs + 1,
+          length: trimmed.length,
+          severity: 'warning',
+          message: `version does not increase over the version on line ${previous.line} ('${previous.text}')`,
+          rule: 'non-increasing-version',
+        })
+      }
+
+      previous = { value: result.value, text: trimmed, line: lineNo }
     }
   }
 
