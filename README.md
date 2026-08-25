@@ -45,6 +45,30 @@ The process exits with a non-zero status if any finding is an error,
 which makes it usable as a pre-commit or CI check. Warnings never affect
 the exit status.
 
+Pass `--json` to get findings as a JSON array instead of the text format
+above, for CI systems that want to parse the output rather than grep it:
+
+```
+node dist/src/linter.js --json VERSIONS
+```
+
+```json
+[
+  {
+    "path": "VERSIONS",
+    "line": 4,
+    "column": 2,
+    "length": 5,
+    "severity": "warning",
+    "message": "duplicate of the version on line 3",
+    "rule": "duplicate-version"
+  }
+]
+```
+
+The exit status rule is the same either way - non-zero if any finding is
+an error.
+
 ## Input format
 
 - One version per line.

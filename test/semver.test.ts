@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { compareSemver, parseSemver } from '../src/semver.js'
-import { lintText } from '../src/linter.js'
+import { findingsToJson, lintText } from '../src/linter.js'
 
 function precedenceOf(version: string) {
   const result = parseSemver(version)
@@ -139,4 +139,19 @@ test('lintText skips unparseable lines when finding the previous version to comp
   const text = ['1.0.0', 'not-a-version', '2.0.0'].join('\n')
   const findings = lintText(text)
   assert.ok(!findings.some((finding) => finding.rule === 'non-increasing-version'))
+})
+
+test('findingsToJson embeds the path and preserves every finding field', () => {
+  const findings = lintText(['1.02.0'].join('\n'))
+  const parsed = JSON.parse(findingsToJson('VERSIONS', findings))
+  assert.equal(parsed.length, 1)
+  assert.equal(parsed[0].path, 'VERSIONS')
+  assert.equal(parsed[0].line, 1)
+  assert.equal(parsed[0].rule, 'core-leading-zero')
+  assert.equal(parsed[0].severity, 'error')
+})
+
+test('findingsToJson returns an empty array for a clean file', () => {
+  const findings = lintText('1.0.0')
+  assert.deepEqual(JSON.parse(findingsToJson('VERSIONS', findings)), [])
 })

@@ -81,10 +81,22 @@ export function formatFinding(path: string, finding: Finding): string {
   return `${path}:${finding.line}:${finding.column}: ${finding.severity}: ${finding.message} [${finding.rule}]`
 }
 
+// Kept separate from main() so the output shape is unit-testable without
+// going through argv parsing or file I/O.
+export function findingsToJson(path: string, findings: Finding[]): string {
+  return JSON.stringify(
+    findings.map((finding) => ({ path, ...finding })),
+    null,
+    2,
+  )
+}
+
 async function main(): Promise<void> {
-  const path = process.argv[2]
+  const args = process.argv.slice(2)
+  const jsonOutput = args.includes('--json')
+  const path = args.find((arg) => arg !== '--json')
   if (!path) {
-    console.error('usage: semver-lint <file>')
+    console.error('usage: semver-lint [--json] <file>')
     process.exitCode = 1
     return
   }
@@ -92,8 +104,12 @@ async function main(): Promise<void> {
   const text = await readFile(path, 'utf8')
   const findings = lintText(text)
 
-  for (const finding of findings) {
-    console.log(formatFinding(path, finding))
+  if (jsonOutput) {
+    console.log(findingsToJson(path, findings))
+  } else {
+    for (const finding of findings) {
+      console.log(formatFinding(path, finding))
+    }
   }
 
   const errorCount = findings.filter((finding) => finding.severity === 'error').length
