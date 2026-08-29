@@ -4,6 +4,7 @@
 // and lines starting with '#' are ignored so the file can carry comments.
 
 import { readFile } from 'node:fs/promises'
+import { basename } from 'node:path'
 import { compareSemver, parseSemver, type SemverParts } from './semver.js'
 
 export interface Finding {
@@ -77,6 +78,104 @@ export function lintText(text: string): Finding[] {
   return findings
 }
 
+function offsetToLineColumn(text: string, offset: number): { line: number; column: number } {
+  let line = 1
+  let lineStart = 0
+  for (let i = 0; i < offset; i++) {
+    if (text[i] === '\n') {
+      line++
+      lineStart = i + 1
+    }
+  }
+  return { line, column: offset - lineStart + 1 }
+}
+
+// Matches the "version" key of a package.json anywhere it appears at the
+// top of the object (npm always keeps it un-nested), capturing the raw
+// text between the quotes so its offset in the file can be recovered
+// without a full JSON parser. Semver version strings never need JSON
+// escaping, so the raw and JSON.parse'd forms are the same in practice.
+const VERSION_FIELD = /"version"\s*:\s*"((?:[^"\\]|\\.)*)"/
+
+// Lints the "version" field of a package.json instead of a plain version
+// list. There's exactly one version to check, so duplicate-version and
+// non-increasing-version don't apply - those compare a line against
+// others in the same file.
+export function lintPackageJson(text: string): Finding[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (err) {
+    return [
+      {
+        line: 1,
+        column: 1,
+        length: 1,
+        severity: 'error',
+        message: `not valid JSON: ${(err as Error).message}`,
+        rule: 'package-json-invalid',
+      },
+    ]
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return [
+      {
+        line: 1,
+        column: 1,
+        length: 1,
+        severity: 'error',
+        message: 'top-level JSON value is not an object',
+        rule: 'package-json-invalid',
+      },
+    ]
+  }
+
+  const version = (parsed as Record<string, unknown>).version
+  if (version === undefined) {
+    return [
+      {
+        line: 1,
+        column: 1,
+        length: 1,
+        severity: 'error',
+        message: "no 'version' field",
+        rule: 'package-json-missing-version',
+      },
+    ]
+  }
+
+  if (typeof version !== 'string') {
+    return [
+      {
+        line: 1,
+        column: 1,
+        length: 1,
+        severity: 'error',
+        message: "'version' field is not a string",
+        rule: 'package-json-non-string-version',
+      },
+    ]
+  }
+
+  const match = VERSION_FIELD.exec(text)
+  // match[0] ends with the closing quote right after the raw capture, so
+  // its start is recoverable by walking back from there - no need to
+  // re-search for the quote and risk matching an earlier one.
+  const valueStart = match ? match.index + match[0].length - 1 - match[1].length : 0
+  const { line, column } = offsetToLineColumn(text, valueStart)
+
+  const result = parseSemver(version)
+  return result.issues.map((issue) => ({
+    line,
+    column: column + issue.start,
+    length: Math.max(1, issue.end - issue.start),
+    severity: issue.severity,
+    message: issue.message,
+    rule: issue.rule,
+  }))
+}
+
 export function formatFinding(path: string, finding: Finding): string {
   return `${path}:${finding.line}:${finding.column}: ${finding.severity}: ${finding.message} [${finding.rule}]`
 }
@@ -102,7 +201,7 @@ async function main(): Promise<void> {
   }
 
   const text = await readFile(path, 'utf8')
-  const findings = lintText(text)
+  const findings = basename(path) === 'package.json' ? lintPackageJson(text) : lintText(text)
 
   if (jsonOutput) {
     console.log(findingsToJson(path, findings))

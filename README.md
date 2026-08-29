@@ -69,6 +69,29 @@ node dist/src/linter.js --json VERSIONS
 The exit status rule is the same either way - non-zero if any finding is
 an error.
 
+## Linting a package.json
+
+If the file argument is named `package.json`, the linter reads its
+`version` field instead of treating the file as a list of versions:
+
+```
+node dist/src/linter.js package.json
+```
+
+```
+package.json:3:15: error: minor version has a leading zero: '02' [core-leading-zero]
+```
+
+Line and column point into the JSON file itself, not into the version
+string in isolation. A `package.json` with no `version` field, a
+non-string `version`, or JSON that doesn't parse at all is reported as a
+single finding (`package-json-missing-version`, `package-json-non-string-version`,
+or `package-json-invalid`) rather than a crash.
+
+Since there's only one version to look at, `duplicate-version` and
+`non-increasing-version` don't apply here - those rules compare a line
+against other lines in the same file.
+
 ## Input format
 
 - One version per line.
@@ -93,6 +116,9 @@ an error.
 | `build-invalid-char` | error | build metadata identifier has a character outside `[0-9A-Za-z-]` |
 | `duplicate-version` | warning | exact same version string already appeared earlier in the file |
 | `non-increasing-version` | warning | version does not have a strictly greater precedence than the version on the line before it |
+| `package-json-invalid` | error | the file isn't valid JSON, or its top-level value isn't an object |
+| `package-json-missing-version` | error | the object has no `version` field |
+| `package-json-non-string-version` | error | the `version` field isn't a string |
 
 Build metadata identifiers are allowed to have leading zeros - the spec
 never uses build metadata for precedence comparisons, so there is nothing
@@ -125,5 +151,7 @@ runner (`node --test`), no test framework required.
 `src/semver.ts` exports `parseSemver(input: string)`, which parses a
 single version string and returns every issue it found rather than
 stopping at the first one. `src/linter.ts` exports `lintText(text: string)`
-for running that parser over a whole file's worth of lines. Both are
-plain functions with no I/O, so they're usable outside the CLI.
+for running that parser over a whole file's worth of lines, and
+`lintPackageJson(text: string)` for running it over a package.json's
+`version` field instead. All three are plain functions with no I/O, so
+they're usable outside the CLI.

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { compareSemver, parseSemver } from '../src/semver.js'
-import { findingsToJson, lintText } from '../src/linter.js'
+import { findingsToJson, lintPackageJson, lintText } from '../src/linter.js'
 
 function precedenceOf(version: string) {
   const result = parseSemver(version)
@@ -154,4 +154,47 @@ test('findingsToJson embeds the path and preserves every finding field', () => {
 test('findingsToJson returns an empty array for a clean file', () => {
   const findings = lintText('1.0.0')
   assert.deepEqual(JSON.parse(findingsToJson('VERSIONS', findings)), [])
+})
+
+test('lintPackageJson finds no issues for a clean version field', () => {
+  const text = JSON.stringify({ name: 'thing', version: '1.2.3' }, null, 2)
+  assert.deepEqual(lintPackageJson(text), [])
+})
+
+test('lintPackageJson reports the leading zero in a version field with the right position', () => {
+  const text = ['{', '  "name": "thing",', '  "version": "1.02.3"', '}'].join('\n')
+  const findings = lintPackageJson(text)
+  assert.equal(findings.length, 1)
+  assert.equal(findings[0].rule, 'core-leading-zero')
+  assert.equal(findings[0].line, 3)
+  // 2 spaces + '"version": "' puts the value's '1' at column 15; '02' follows
+  // two characters later at column 17.
+  assert.equal(findings[0].column, 17)
+})
+
+test('lintPackageJson reports malformed JSON without throwing', () => {
+  const findings = lintPackageJson('{ "version": "1.0.0", ')
+  assert.equal(findings.length, 1)
+  assert.equal(findings[0].rule, 'package-json-invalid')
+  assert.equal(findings[0].severity, 'error')
+})
+
+test('lintPackageJson reports a missing version field', () => {
+  const findings = lintPackageJson(JSON.stringify({ name: 'thing' }))
+  assert.equal(findings.length, 1)
+  assert.equal(findings[0].rule, 'package-json-missing-version')
+})
+
+test('lintPackageJson reports a non-string version field', () => {
+  const findings = lintPackageJson(JSON.stringify({ name: 'thing', version: 123 }))
+  assert.equal(findings.length, 1)
+  assert.equal(findings[0].rule, 'package-json-non-string-version')
+})
+
+test('lintPackageJson can report several issues on the same version field', () => {
+  const text = JSON.stringify({ version: '1.02.3-beta_1' }, null, 2)
+  const findings = lintPackageJson(text)
+  const rules = findings.map((finding) => finding.rule)
+  assert.ok(rules.includes('core-leading-zero'))
+  assert.ok(rules.includes('prerelease-invalid-char'))
 })
