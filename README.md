@@ -69,6 +69,33 @@ node dist/src/linter.js --json VERSIONS
 The exit status rule is the same either way - non-zero if any finding is
 an error.
 
+## Fixing
+
+Pass `--fix` to have the linter correct what it can and rewrite the file
+in place, before reporting whatever findings are left:
+
+```
+node dist/src/linter.js --fix VERSIONS
+```
+
+```
+fixed 1 line in VERSIONS
+VERSIONS:4:2: warning: duplicate of the version on line 3 [duplicate-version]
+VERSIONS:7:8: error: pre-release identifier is empty (check for a stray or trailing dot) [prerelease-empty-id]
+```
+
+Only `core-leading-zero` and `prerelease-leading-zero` have an automatic
+fix - stripping the extra zeros is the one unambiguous correction. Every
+other rule is left for a human: there's no single right answer for a
+missing field, an invalid character, or a duplicate, so guessing would do
+more harm than reporting nothing. A line with both a fixable and an
+unfixable problem comes back partially corrected, with the unfixable part
+still reported.
+
+`--fix` normalizes mixed line endings in a VERSIONS file to whichever one
+the file uses first; a `package.json`'s formatting outside the `version`
+field is left exactly as it was.
+
 ## Linting a package.json
 
 If the file argument is named `package.json`, the linter reads its
@@ -150,8 +177,12 @@ runner (`node --test`), no test framework required.
 
 `src/semver.ts` exports `parseSemver(input: string)`, which parses a
 single version string and returns every issue it found rather than
-stopping at the first one. `src/linter.ts` exports `lintText(text: string)`
-for running that parser over a whole file's worth of lines, and
-`lintPackageJson(text: string)` for running it over a package.json's
-`version` field instead. All three are plain functions with no I/O, so
-they're usable outside the CLI.
+stopping at the first one. Issues with an unambiguous correction carry a
+`fix` field - the text to substitute for `input.slice(issue.start,
+issue.end)`. `src/linter.ts` exports `lintText(text: string)` for running
+that parser over a whole file's worth of lines, and `lintPackageJson(text:
+string)` for running it over a package.json's `version` field instead. For
+applying those corrections there's `fixText(text: string)` and
+`fixPackageJson(text: string)`, each returning `{ fixed, fixedCount }`.
+All of these are plain functions with no I/O, so they're usable outside
+the CLI.

@@ -3,7 +3,7 @@
 // log exported from git, a column pulled out of a changelog). Blank lines
 // and lines starting with '#' are ignored so the file can carry comments.
 
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { compareSemver, parseSemver, type SemverParts } from './semver.js'
 
@@ -76,6 +76,84 @@ export function lintText(text: string): Finding[] {
   }
 
   return findings
+}
+
+export interface FixResult {
+  fixed: string
+  // Number of versions actually changed - lines for lintText's input,
+  // or 0/1 for lintPackageJson's, since there's only one version field.
+  fixedCount: number
+}
+
+// Applies every issue that carries a `fix` (currently just the two
+// leading-zero rules) to a single version string. Issues without a fix are
+// left alone, so a version with both a fixable and an unfixable problem
+// still comes back partially corrected rather than untouched.
+function fixVersionString(input: string): { fixed: string; changed: boolean } {
+  const fixable = parseSemver(input).issues.filter((issue) => issue.fix !== undefined)
+  if (fixable.length === 0) return { fixed: input, changed: false }
+
+  // Apply from the rightmost offset first so earlier splices don't shift
+  // the start/end positions of the ones still to come.
+  const sorted = [...fixable].sort((a, b) => b.start - a.start)
+  let fixed = input
+  for (const issue of sorted) {
+    fixed = fixed.slice(0, issue.start) + issue.fix + fixed.slice(issue.end)
+  }
+  return { fixed, changed: true }
+}
+
+// Fixes every line of a version-list file the same way lintText reads it.
+// Mixed line endings are normalized to whichever one appears first in the
+// file, since there's no single "fixed" line ending to preserve otherwise.
+export function fixText(text: string): FixResult {
+  const ending = text.includes('\r\n') ? '\r\n' : text.includes('\r') ? '\r' : '\n'
+  const lines = text.split(/\r\n|\r|\n/)
+  let fixedCount = 0
+
+  const outLines = lines.map((rawLine) => {
+    const trimmed = rawLine.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) return rawLine
+
+    const leading = rawLine.slice(0, rawLine.length - rawLine.trimStart().length)
+    const trailing = rawLine.slice(rawLine.trimEnd().length)
+    const { fixed, changed } = fixVersionString(trimmed)
+    if (!changed) return rawLine
+
+    fixedCount++
+    return leading + fixed + trailing
+  })
+
+  return { fixed: outLines.join(ending), fixedCount }
+}
+
+// Fixes the "version" field of a package.json in place, leaving the rest
+// of the file - formatting, key order, other fields - untouched.
+export function fixPackageJson(text: string): FixResult {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return { fixed: text, fixedCount: 0 }
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { fixed: text, fixedCount: 0 }
+  }
+
+  const version = (parsed as Record<string, unknown>).version
+  if (typeof version !== 'string') {
+    return { fixed: text, fixedCount: 0 }
+  }
+
+  const { fixed: fixedVersion, changed } = fixVersionString(version)
+  if (!changed) return { fixed: text, fixedCount: 0 }
+
+  const match = VERSION_FIELD.exec(text)
+  if (!match) return { fixed: text, fixedCount: 0 }
+
+  const valueStart = match.index + match[0].length - 1 - match[1].length
+  const fixed = text.slice(0, valueStart) + fixedVersion + text.slice(valueStart + match[1].length)
+  return { fixed, fixedCount: 1 }
 }
 
 function offsetToLineColumn(text: string, offset: number): { line: number; column: number } {
@@ -193,15 +271,30 @@ export function findingsToJson(path: string, findings: Finding[]): string {
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
   const jsonOutput = args.includes('--json')
-  const path = args.find((arg) => arg !== '--json')
+  const fix = args.includes('--fix')
+  const path = args.find((arg) => arg !== '--json' && arg !== '--fix')
   if (!path) {
-    console.error('usage: semver-lint [--json] <file>')
+    console.error('usage: semver-lint [--json] [--fix] <file>')
     process.exitCode = 1
     return
   }
 
-  const text = await readFile(path, 'utf8')
-  const findings = basename(path) === 'package.json' ? lintPackageJson(text) : lintText(text)
+  const isPackageJson = basename(path) === 'package.json'
+  let text = await readFile(path, 'utf8')
+
+  if (fix) {
+    const result = isPackageJson ? fixPackageJson(text) : fixText(text)
+    if (result.fixedCount > 0) {
+      await writeFile(path, result.fixed, 'utf8')
+      text = result.fixed
+      const noun = isPackageJson ? 'issue' : 'line'
+      console.error(`fixed ${result.fixedCount} ${noun}${result.fixedCount === 1 ? '' : 's'} in ${path}`)
+    } else {
+      console.error(`no automatic fixes available in ${path}`)
+    }
+  }
+
+  const findings = isPackageJson ? lintPackageJson(text) : lintText(text)
 
   if (jsonOutput) {
     console.log(findingsToJson(path, findings))

@@ -16,6 +16,11 @@ export interface ParseIssue {
   // want to point at the exact substring that triggered the issue.
   start: number
   end: number
+  // Text to replace input.slice(start, end) with, when the issue has one
+  // obvious correction. Most rules leave this unset - there's no single
+  // right answer for, say, an invalid character in a pre-release
+  // identifier, so guessing one would be worse than saying nothing.
+  fix?: string
 }
 
 export interface SemverParts {
@@ -34,6 +39,13 @@ export interface ParseResult {
 
 const ALL_DIGITS = /^\d+$/
 const IDENTIFIER_CHARS = /^[0-9A-Za-z-]+$/
+
+// Only called once a field has already passed ALL_DIGITS and is known to
+// have a leading zero, so there's always a non-zero digit (or the final
+// zero of an all-zero run) left for the lookahead to land on.
+function stripLeadingZeros(digits: string): string {
+  return digits.replace(/^0+(?=\d)/, '')
+}
 
 interface Field {
   text: string
@@ -81,6 +93,7 @@ function checkCoreField(field: Field, label: string, issues: ParseIssue[]): void
       message: `${label} version has a leading zero: '${field.text}'`,
       start: field.start,
       end: field.start + field.text.length,
+      fix: stripLeadingZeros(field.text),
     })
   }
 }
@@ -115,6 +128,7 @@ function checkPrereleaseId(field: Field, issues: ParseIssue[]): void {
       message: `numeric pre-release identifier '${field.text}' has a leading zero`,
       start: field.start,
       end: field.start + field.text.length,
+      fix: stripLeadingZeros(field.text),
     })
   }
 }

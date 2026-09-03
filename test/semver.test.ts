@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { compareSemver, parseSemver } from '../src/semver.js'
-import { findingsToJson, lintPackageJson, lintText } from '../src/linter.js'
+import { findingsToJson, fixPackageJson, fixText, lintPackageJson, lintText } from '../src/linter.js'
 
 function precedenceOf(version: string) {
   const result = parseSemver(version)
@@ -189,6 +189,52 @@ test('lintPackageJson reports a non-string version field', () => {
   const findings = lintPackageJson(JSON.stringify({ name: 'thing', version: 123 }))
   assert.equal(findings.length, 1)
   assert.equal(findings[0].rule, 'package-json-non-string-version')
+})
+
+test('fixText strips leading zeros and leaves everything else untouched', () => {
+  const text = ['1.02.0', '1.2.3-01', '1.2.3 extra', '# comment', '', '1.2.3'].join('\n')
+  const result = fixText(text)
+  assert.equal(result.fixedCount, 2)
+  assert.deepEqual(result.fixed.split('\n'), ['1.2.0', '1.2.3-1', '1.2.3 extra', '# comment', '', '1.2.3'])
+})
+
+test('fixText rewrites only the version substring, keeping surrounding whitespace and the v-prefix', () => {
+  const result = fixText('  v01.2.3  ')
+  assert.equal(result.fixedCount, 1)
+  assert.equal(result.fixed, '  v1.2.3  ')
+})
+
+test('fixText normalizes line endings to whichever one appears first in the file', () => {
+  const result = fixText(['1.02.0', '1.2.3'].join('\r\n'))
+  assert.equal(result.fixed, ['1.2.0', '1.2.3'].join('\r\n'))
+})
+
+test('fixText reports zero fixes for a file with nothing fixable', () => {
+  const result = fixText(['1.2.3', '1.2.3 extra'].join('\n'))
+  assert.equal(result.fixedCount, 0)
+  assert.equal(result.fixed, ['1.2.3', '1.2.3 extra'].join('\n'))
+})
+
+test('fixPackageJson fixes the version field while leaving the rest of the file alone', () => {
+  const text = JSON.stringify({ name: 'thing', version: '1.02.3' }, null, 2)
+  const result = fixPackageJson(text)
+  assert.equal(result.fixedCount, 1)
+  const parsed = JSON.parse(result.fixed)
+  assert.equal(parsed.version, '1.2.3')
+  assert.equal(parsed.name, 'thing')
+})
+
+test('fixPackageJson leaves a clean version field untouched', () => {
+  const text = JSON.stringify({ name: 'thing', version: '1.2.3' }, null, 2)
+  const result = fixPackageJson(text)
+  assert.equal(result.fixedCount, 0)
+  assert.equal(result.fixed, text)
+})
+
+test('fixPackageJson is a no-op on invalid JSON rather than throwing', () => {
+  const result = fixPackageJson('{ "version": "1.02.3", ')
+  assert.equal(result.fixedCount, 0)
+  assert.equal(result.fixed, '{ "version": "1.02.3", ')
 })
 
 test('lintPackageJson can report several issues on the same version field', () => {
