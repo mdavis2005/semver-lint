@@ -2,15 +2,27 @@
   "name": "semver-lint",
   "version": "0.1.0",
   "description": "A linter for semantic version strings that reports findings with line numbers",
+  "keywords": [
+    "semver",
+    "semantic-versioning",
+    "lint",
+    "linter",
+    "version",
+    "cli"
+  ],
   "type": "module",
   "main": "dist/src/linter.js",
   "bin": {
     "semver-lint": "dist/src/linter.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "npm run build && node --test dist/",
-    "lint": "node dist/src/linter.js"
+    "lint": "node dist/src/linter.js",
+    "prepublishOnly": "npm run test"
   },
   "engines": {
     "node": ">=18.0.0"
