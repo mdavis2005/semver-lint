@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Lints a plain text file that lists one version per line - the kind of
 // file a release process might maintain by hand (a VERSIONS file, a tag
 // log exported from git, a column pulled out of a changelog). Blank lines
