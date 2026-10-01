@@ -43,7 +43,8 @@ VERSIONS:7:8: error: pre-release identifier is empty (check for a stray or trail
 
 The process exits with a non-zero status if any finding is an error,
 which makes it usable as a pre-commit or CI check. Warnings never affect
-the exit status.
+the exit status. If the file can't be read, the error is printed and the
+exit status is 2.
 
 Pass `--json` to get findings as a JSON array instead of the text format
 above, for CI systems that want to parse the output rather than grep it:

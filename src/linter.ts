@@ -4,8 +4,10 @@
 // log exported from git, a column pulled out of a changelog). Blank lines
 // and lines starting with '#' are ignored so the file can carry comments.
 
+import { realpathSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { compareSemver, parseSemver, type SemverParts } from './semver.js'
 
 export interface Finding {
@@ -311,7 +313,23 @@ async function main(): Promise<void> {
   }
 }
 
-const invokedDirectly = process.argv[1] !== undefined && import.meta.url === `file://${process.argv[1]}`
-if (invokedDirectly) {
-  main()
+// When installed from npm, argv[1] is the symlink in node_modules/.bin, not
+// this file, and it may contain characters that file:// URLs percent-encode.
+// Comparing resolved real paths handles both; a plain URL comparison would
+// make the installed bin silently do nothing.
+function isEntryPoint(): boolean {
+  const entry = process.argv[1]
+  if (entry === undefined) return false
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isEntryPoint()) {
+  main().catch((err: Error) => {
+    console.error(`semver-lint: ${err.message}`)
+    process.exitCode = 2
+  })
 }
